@@ -4,403 +4,752 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OKX 历史价格查询</title>
+  <title>OKX Price Time Machine</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       min-height: 100vh;
-      background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #0a0a0f 100%);
+      background: #0a0a12;
       color: #e0e0e0;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     }
-    input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; }
     input[type=number] { -moz-appearance: textfield; }
-    select option { background: #1e1e30; color: #fff; }
-    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+    select option { background: #1a1a2e; color: #fff; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
     .pulse { animation: pulse 1.5s infinite; }
-    a:hover { opacity: 0.85; }
+    .fade-in { animation: fadeIn 0.25s ease-out forwards; opacity: 0; }
+    a { text-decoration: none; }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
   </style>
 </head>
 <body>
   <div id="root"></div>
   <script type="text/babel">
-    const { useState, useCallback, useRef } = React;
+    const { useState, useCallback, useRef, useEffect, useMemo } = React;
 
+    /* ═══════════════════════════════════════════
+       CONFIG
+    ═══════════════════════════════════════════ */
     const PAIRS = [
-      "BTC-USDT","ETH-USDT","SOL-USDT","BNB-USDT",
-      "XRP-USDT","DOGE-USDT","ADA-USDT","AVAX-USDT",
-      "DOT-USDT","LINK-USDT","MATIC-USDT","LTC-USDT",
-      "UNI-USDT","ATOM-USDT","FIL-USDT","APT-USDT",
-      "ARB-USDT","OP-USDT","NEAR-USDT","TRX-USDT",
-    ];
-
-    const NEWS_SOURCES = [
-      { name: "CoinDesk", icon: "📰", url: (q,d) => `https://www.google.com/search?q=site:coindesk.com+${q}+after:${d.from}+before:${d.to}` },
-      { name: "CoinTelegraph", icon: "📡", url: (q,d) => `https://www.google.com/search?q=site:cointelegraph.com+${q}+after:${d.from}+before:${d.to}` },
-      { name: "The Block", icon: "🧱", url: (q,d) => `https://www.google.com/search?q=site:theblock.co+${q}+after:${d.from}+before:${d.to}` },
-      { name: "Decrypt", icon: "🔓", url: (q,d) => `https://www.google.com/search?q=site:decrypt.co+${q}+after:${d.from}+before:${d.to}` },
-      { name: "Bloomberg", icon: "💹", url: (q,d) => `https://www.google.com/search?q=site:bloomberg.com+crypto+${q}+after:${d.from}+before:${d.to}` },
-      { name: "Reuters", icon: "🌐", url: (q,d) => `https://www.google.com/search?q=site:reuters.com+${q}+crypto+after:${d.from}+before:${d.to}` },
-      { name: "金色财经", icon: "🥇", url: (q,d) => `https://www.google.com/search?q=site:jinse.cn+${q}+after:${d.from}+before:${d.to}` },
-      { name: "BlockBeats", icon: "🎵", url: (q,d) => `https://www.google.com/search?q=site:theblockbeats.info+${q}+after:${d.from}+before:${d.to}` },
-      { name: "PANews", icon: "📋", url: (q,d) => `https://www.google.com/search?q=site:panewslab.com+${q}+after:${d.from}+before:${d.to}` },
-      { name: "CNBC", icon: "📺", url: (q,d) => `https://www.google.com/search?q=site:cnbc.com+${q}+crypto+after:${d.from}+before:${d.to}` },
+      "BTC-USDT","ETH-USDT","SOL-USDT","BNB-USDT","XRP-USDT","DOGE-USDT",
+      "ADA-USDT","AVAX-USDT","DOT-USDT","LINK-USDT","MATIC-USDT","LTC-USDT",
+      "UNI-USDT","ATOM-USDT","FIL-USDT","APT-USDT","ARB-USDT","OP-USDT",
+      "NEAR-USDT","TRX-USDT",
     ];
 
     const BAR_OPTIONS = [
-      { label: "1分钟", value: "1m" },
-      { label: "5分钟", value: "5m" },
-      { label: "1小时", value: "1H" },
-      { label: "4小时", value: "4H" },
-      { label: "1天", value: "1D" },
+      { label: "1m", value: "1m" },
+      { label: "5m", value: "5m" },
+      { label: "1H", value: "1H" },
+      { label: "4H", value: "4H" },
+      { label: "1D", value: "1D" },
     ];
 
-    function formatDate(ts) {
-      const d = new Date(Number(ts));
-      return d.toLocaleString("zh-CN", {
-        year: "numeric", month: "2-digit", day: "2-digit",
-        hour: "2-digit", minute: "2-digit", second: "2-digit",
-        hour12: false, timeZone: "Asia/Shanghai",
+    /* ═══════════════════════════════════════════
+       MAJOR EVENTS DATABASE
+       Categories: trump, etf, halving, regulation, hack, macro, adoption
+    ═══════════════════════════════════════════ */
+    const MAJOR_EVENTS = [
+      // ── Trump / 政治 ──
+      { date: "2024-11-05", cat: "trump", title: "特朗普赢得美国总统大选", desc: "市场预期加密友好政策，BTC 突破 $75,000" },
+      { date: "2024-11-15", cat: "trump", title: "特朗普会见 Coinbase & Ripple 高管", desc: "讨论加密监管框架，异常回报 +5.63%" },
+      { date: "2025-01-20", cat: "trump", title: "特朗普就职典礼", desc: "BTC 当日涨 9%，逼近 $110,000 历史新高" },
+      { date: "2025-01-23", cat: "trump", title: "签署数字资产行政令", desc: "成立加密工作组，制定监管框架" },
+      { date: "2025-03-06", cat: "trump", title: "战略比特币储备行政令", desc: "宣布建立国家 BTC 储备，市场先涨后跌" },
+      { date: "2025-03-07", cat: "trump", title: "白宫加密峰会", desc: "与行业领袖讨论监管与储备细节" },
+      { date: "2025-04-02", cat: "trump", title: "特朗普\"解放日\"关税", desc: "宣布对等关税，全球市场震荡，BTC 跌至 $82K" },
+      { date: "2025-04-07", cat: "trump", title: "关税升级 中国 145%", desc: "BTC 跌至 $74,000 低点，恐慌情绪蔓延" },
+      { date: "2025-04-09", cat: "trump", title: "90天关税暂停", desc: "BTC 反弹超 8%，市场大幅回暖" },
+      { date: "2025-05-12", cat: "trump", title: "中美日内瓦贸易协议", desc: "关税大幅降低，BTC 突破 $105K" },
+      { date: "2025-12-16", cat: "trump", title: "美国稳定币法案推进", desc: "参议院推进 GENIUS Act 稳定币立法" },
+      { date: "2026-01-15", cat: "trump", title: "特朗普数字资产政策年度回顾", desc: "执政满一年，加密监管政策逐步明朗" },
+
+      // ── ETF ──
+      { date: "2024-01-10", cat: "etf", title: "SEC 批准 BTC 现货 ETF", desc: "11只 BTC 现货 ETF 获批，历史性时刻" },
+      { date: "2024-05-23", cat: "etf", title: "SEC 批准 ETH 现货 ETF", desc: "以太坊现货 ETF 19b-4 表格获批" },
+      { date: "2024-07-23", cat: "etf", title: "ETH ETF 正式交易", desc: "9只以太坊 ETF 上市交易" },
+      { date: "2025-04-30", cat: "etf", title: "BTC ETF 期权交易扩展", desc: "多家交易所推出 BTC ETF 期权产品" },
+      { date: "2025-07-10", cat: "etf", title: "SOL ETF 申请提交", desc: "多家机构提交 SOL 现货 ETF 申请" },
+
+      // ── 减半 ──
+      { date: "2024-04-20", cat: "halving", title: "BTC 第四次减半", desc: "区块奖励从 6.25 降至 3.125 BTC" },
+
+      // ── 监管 ──
+      { date: "2024-03-20", cat: "regulation", title: "SEC 起诉多家 DeFi 平台", desc: "监管收紧 DeFi 领域" },
+      { date: "2024-06-13", cat: "regulation", title: "SEC 撤销部分对以太坊调查", desc: "ETH 证券争议暂告段落" },
+      { date: "2024-11-21", cat: "regulation", title: "SEC 主席 Gary Gensler 宣布辞职", desc: "预计继任者更加加密友好" },
+      { date: "2025-02-04", cat: "regulation", title: "SEC 成立加密特别工作组", desc: "由 Hester Peirce 领导的 Crypto Task Force" },
+      { date: "2025-06-15", cat: "regulation", title: "MiCA 在欧盟全面生效", desc: "欧盟加密市场法规完全实施" },
+
+      // ── 安全/黑客 ──
+      { date: "2024-02-09", cat: "hack", title: "PlayDapp 被黑 $2.9亿", desc: "铸币漏洞被利用，损失巨大" },
+      { date: "2025-02-21", cat: "hack", title: "Bybit 被黑 $14.6亿", desc: "史上最大加密盗窃案，Lazarus Group" },
+
+      // ── 宏观经济 ──
+      { date: "2024-03-20", cat: "macro", title: "美联储维持利率 5.25-5.50%", desc: "鲍威尔暗示年内可能降息" },
+      { date: "2024-06-12", cat: "macro", title: "美国 CPI 低于预期", desc: "通胀放缓，降息预期增强" },
+      { date: "2024-09-18", cat: "macro", title: "美联储降息 50bp", desc: "首次降息至 4.75-5.00%，市场大涨" },
+      { date: "2024-11-07", cat: "macro", title: "美联储再降息 25bp", desc: "利率降至 4.50-4.75%" },
+      { date: "2024-12-18", cat: "macro", title: "美联储第三次降息 25bp", desc: "但暗示 2025 降息步伐放缓，市场回调" },
+      { date: "2025-01-29", cat: "macro", title: "美联储暂停降息", desc: "维持利率 4.25-4.50%，观望通胀" },
+      { date: "2025-03-19", cat: "macro", title: "美联储继续按兵不动", desc: "关税不确定性影响政策判断" },
+      { date: "2025-05-07", cat: "macro", title: "美联储维持利率不变", desc: "鲍威尔强调需更多数据" },
+      { date: "2025-09-17", cat: "macro", title: "美联储重启降息", desc: "降息 25bp，经济放缓信号" },
+
+      // ── 行业/采用 ──
+      { date: "2024-03-14", cat: "adoption", title: "BTC 突破 $73,000 新高", desc: "ETF 资金持续流入推动" },
+      { date: "2024-12-05", cat: "adoption", title: "BTC 首次突破 $100,000", desc: "历史性里程碑" },
+      { date: "2025-01-20", cat: "adoption", title: "BTC 新高 $109,000", desc: "特朗普就职日行情" },
+      { date: "2025-05-22", cat: "adoption", title: "BTC 突破 $111,000", desc: "刷新历史最高纪录" },
+      { date: "2025-11-20", cat: "adoption", title: "微策略 BTC 持仓超 50万枚", desc: "企业持币标杆" },
+    ];
+
+    const CAT_CONFIG = {
+      trump:      { label: "特朗普/政治", color: "#ff6b35", icon: "🏛️" },
+      etf:        { label: "ETF",         color: "#00e5ff", icon: "📊" },
+      halving:    { label: "减半",        color: "#ffd700", icon: "⛏️" },
+      regulation: { label: "监管",        color: "#ff5252", icon: "⚖️" },
+      hack:       { label: "安全事件",    color: "#ff1744", icon: "🔓" },
+      macro:      { label: "宏观经济",    color: "#69f0ae", icon: "🏦" },
+      adoption:   { label: "行业/采用",   color: "#8b5cf6", icon: "🚀" },
+    };
+
+    /* ═══════════════════════════════════════════
+       NEWS SOURCE TIER
+    ═══════════════════════════════════════════ */
+    const SOURCE_T1 = new Set(["coindesk","cointelegraph","theblock","the_block","decrypt","bloomberg","reuters","cnbc","blockworks"]);
+    const SOURCE_T2 = new Set(["bitcoinmagazine","dailyhodl","cryptoslate","ambcrypto","beincrypto","cryptopotato","unchainedcrypto","thedefiant"]);
+    function srcTier(s) {
+      const k = (s||"").toLowerCase().replace(/[\s.\-]/g,"");
+      if (SOURCE_T1.has(k)) return 1;
+      if (SOURCE_T2.has(k)) return 2;
+      return 3;
+    }
+    const TIER_COLOR = { 1: "#00e5ff", 2: "#8b5cf6", 3: "#555" };
+
+    /* ═══════════════════════════════════════════
+       UTILS
+    ═══════════════════════════════════════════ */
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+    function fmtDate(ts) {
+      return new Date(Number(ts)).toLocaleString("zh-CN", {
+        year:"numeric",month:"2-digit",day:"2-digit",
+        hour:"2-digit",minute:"2-digit",second:"2-digit",
+        hour12:false, timeZone:"Asia/Shanghai",
       });
     }
-
-    function dateStr(ts, offsetDays = 0) {
-      const d = new Date(Number(ts) + offsetDays * 86400000);
-      return d.toISOString().slice(0, 10);
+    function fmtShort(ts) {
+      return new Date(Number(ts)).toLocaleString("zh-CN", {
+        month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",
+        hour12:false, timeZone:"Asia/Shanghai",
+      });
     }
-
+    function dateStr(ts, off=0) {
+      return new Date(Number(ts)+off*864e5).toISOString().slice(0,10);
+    }
     function timeSince(ts) {
-      const now = Date.now();
-      const diff = now - Number(ts);
-      const mins = Math.floor(diff / 60000);
-      if (mins < 60) return `${mins} 分钟前`;
-      const hours = Math.floor(mins / 60);
-      if (hours < 24) return `${hours} 小时前`;
-      const days = Math.floor(hours / 24);
-      if (days < 30) return `${days} 天前`;
-      const months = Math.floor(days / 30);
-      if (months < 12) return `${months} 个月前`;
-      return `${Math.floor(months / 12)} 年前`;
+      const d = Date.now()-Number(ts), m=Math.floor(d/6e4);
+      if(m<60) return m+" 分钟前";
+      const h=Math.floor(m/60); if(h<24) return h+" 小时前";
+      const dy=Math.floor(h/24); if(dy<30) return dy+" 天前";
+      const mo=Math.floor(dy/30); if(mo<12) return mo+" 个月前";
+      return Math.floor(mo/12)+" 年前";
     }
 
+    /* ═══════════════════════════════════════════
+       FETCH NEWS (CryptoCompare)
+    ═══════════════════════════════════════════ */
+    async function fetchNews(coin, hitTs) {
+      const hitSec = Math.floor(Number(hitTs)/1000);
+      const lo = hitSec - 2*86400, hi = hitSec + 86400;
+      const all = []; let lTs = hi;
+      for (let p=0; p<5; p++) {
+        try {
+          const r = await fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=${coin}&lTs=${lTs}&extraParams=OKXTimeMachine`);
+          if(!r.ok) break;
+          const j = await r.json();
+          if(!j.Data||!j.Data.length) break;
+          for (const a of j.Data) {
+            if(a.published_on>=lo && a.published_on<=hi) all.push(a);
+            if(a.published_on<lo) return dedup(all);
+          }
+          lTs = j.Data[j.Data.length-1].published_on;
+          await sleep(200);
+        } catch(e) { break; }
+      }
+      return dedup(all);
+    }
+    function dedup(a) { const s=new Set(); return a.filter(x=>{ if(s.has(x.id))return false; s.add(x.id); return true; }); }
+
+    /* ═══════════════════════════════════════════
+       CHART COMPONENT (TradingView Lightweight)
+    ═══════════════════════════════════════════ */
+    function PriceChart({ candles, hitTs, hitPrice, pair, events, enabledCats }) {
+      const containerRef = useRef(null);
+      const chartRef = useRef(null);
+      const [tooltip, setTooltip] = useState(null);
+
+      useEffect(() => {
+        if (!containerRef.current || !candles.length) return;
+        // clear
+        containerRef.current.innerHTML = "";
+        const chart = LightweightCharts.createChart(containerRef.current, {
+          width: containerRef.current.clientWidth,
+          height: 400,
+          layout: { background: { color: "#0d0d1a" }, textColor: "#888", fontSize: 12 },
+          grid: { vertLines: { color: "#1a1a2e" }, horzLines: { color: "#1a1a2e" } },
+          crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+          rightPriceScale: { borderColor: "#2a2a40" },
+          timeScale: { borderColor: "#2a2a40", timeVisible: true, secondsVisible: false },
+        });
+        chartRef.current = chart;
+
+        const series = chart.addCandlestickSeries({
+          upColor: "#26a69a", downColor: "#ef5350",
+          borderUpColor: "#26a69a", borderDownColor: "#ef5350",
+          wickUpColor: "#26a69a", wickDownColor: "#ef5350",
+        });
+
+        const data = candles.map(c => ({
+          time: Math.floor(Number(c[0])/1000),
+          open: Number(c[1]), high: Number(c[2]),
+          low: Number(c[3]), close: Number(c[4]),
+        })).sort((a,b)=>a.time-b.time);
+
+        series.setData(data);
+
+        // Hit price line
+        if (hitPrice) {
+          series.createPriceLine({
+            price: Number(hitPrice),
+            color: "#00e5ff",
+            lineWidth: 1,
+            lineStyle: LightweightCharts.LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: "目标价 $" + Number(hitPrice).toLocaleString(),
+          });
+        }
+
+        // Event markers
+        const markers = [];
+        const hitSec = Math.floor(Number(hitTs)/1000);
+        const minT = data[0]?.time || 0;
+        const maxT = data[data.length-1]?.time || Infinity;
+
+        events.forEach(ev => {
+          if (!enabledCats.has(ev.cat)) return;
+          const evSec = Math.floor(new Date(ev.date+"T00:00:00Z").getTime()/1000);
+          if (evSec >= minT && evSec <= maxT) {
+            // snap to nearest candle
+            let closest = data[0];
+            let minDiff = Infinity;
+            for (const d of data) {
+              const diff = Math.abs(d.time - evSec);
+              if (diff < minDiff) { minDiff = diff; closest = d; }
+            }
+            const cfg = CAT_CONFIG[ev.cat];
+            markers.push({
+              time: closest.time,
+              position: "aboveBar",
+              color: cfg.color,
+              shape: "circle",
+              text: cfg.icon + " " + ev.title.slice(0, 12),
+              id: ev.date + ev.cat,
+            });
+          }
+        });
+        markers.sort((a,b)=>a.time-b.time);
+        series.setMarkers(markers);
+
+        // hit time marker
+        const hitMarker = {
+          time: hitSec,
+          position: "belowBar",
+          color: "#00e5ff",
+          shape: "arrowUp",
+          text: "⏱ 触及目标价",
+        };
+        const allMarkers = [...markers, hitMarker].sort((a,b)=>a.time-b.time);
+        series.setMarkers(allMarkers);
+
+        // auto-fit
+        chart.timeScale().fitContent();
+
+        // resize
+        const ro = new ResizeObserver(() => {
+          if(containerRef.current) chart.applyOptions({ width: containerRef.current.clientWidth });
+        });
+        ro.observe(containerRef.current);
+
+        return () => { chart.remove(); ro.disconnect(); };
+      }, [candles, hitTs, hitPrice, events, enabledCats]);
+
+      return <div ref={containerRef} style={{ width:"100%", borderRadius:12, overflow:"hidden" }} />;
+    }
+
+    /* ═══════════════════════════════════════════
+       EVENT TIMELINE COMPONENT
+    ═══════════════════════════════════════════ */
+    function EventTimeline({ events, hitTs, enabledCats }) {
+      const hitDate = dateStr(hitTs);
+      // show events within ±30 days of hit
+      const lo = new Date(Number(hitTs) - 30*864e5).toISOString().slice(0,10);
+      const hi = new Date(Number(hitTs) + 30*864e5).toISOString().slice(0,10);
+
+      const nearby = events
+        .filter(e => e.date >= lo && e.date <= hi && enabledCats.has(e.cat))
+        .sort((a,b) => a.date.localeCompare(b.date));
+
+      if (!nearby.length) return null;
+
+      return (
+        <div style={{ marginTop: 16 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 12 }}>
+            📅 事件时间轴（触及日 ±30天）
+          </h3>
+          <div style={{ position: "relative", paddingLeft: 20 }}>
+            <div style={{ position:"absolute", left:7, top:0, bottom:0, width:2, background:"#1e1e35" }} />
+            {nearby.map((ev,i) => {
+              const cfg = CAT_CONFIG[ev.cat];
+              const isHitDay = ev.date === hitDate;
+              return (
+                <div key={ev.date+ev.cat+i} className="fade-in" style={{
+                  position:"relative", marginBottom:12, paddingLeft:18,
+                  animationDelay: `${i*40}ms`,
+                }}>
+                  <div style={{
+                    position:"absolute", left:-2, top:6, width:14, height:14,
+                    borderRadius:"50%", background: cfg.color,
+                    border: isHitDay ? "2px solid #fff" : "2px solid #0d0d1a",
+                    zIndex:1,
+                  }} />
+                  <div style={{
+                    background: isHitDay ? "rgba(0,229,255,0.08)" : "rgba(255,255,255,0.02)",
+                    border: `1px solid ${isHitDay ? "rgba(0,229,255,0.2)" : "rgba(255,255,255,0.05)"}`,
+                    borderRadius: 10, padding: "10px 14px",
+                  }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
+                      <span style={{ fontSize:11, color:"#666" }}>{ev.date}</span>
+                      <span style={{
+                        fontSize:9, fontWeight:800, padding:"1px 7px", borderRadius:4,
+                        background: cfg.color+"22", color: cfg.color, border:`1px solid ${cfg.color}44`,
+                      }}>{cfg.icon} {cfg.label}</span>
+                    </div>
+                    <div style={{ fontSize:13, fontWeight:700, color:"#eee", marginBottom:2 }}>
+                      {ev.title}
+                    </div>
+                    <div style={{ fontSize:12, color:"#888", lineHeight:1.5 }}>{ev.desc}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    /* ═══════════════════════════════════════════
+       NEWS CARD COMPONENT
+    ═══════════════════════════════════════════ */
+    function NewsCard({ article, index }) {
+      const tier = srcTier(article.source_info?.name || article.source);
+      const labels = { 1:"T1", 2:"T2", 3:"T3" };
+      return (
+        <a href={article.url} target="_blank" rel="noopener noreferrer"
+          className="fade-in" style={{
+            display:"block", background:"rgba(255,255,255,0.02)",
+            border:`1px solid ${tier===1?"rgba(0,229,255,0.12)":"rgba(255,255,255,0.05)"}`,
+            borderRadius:10, padding:"14px 16px", marginBottom:8,
+            transition:"all 0.15s", animationDelay:`${index*40}ms`,
+          }}
+          onMouseOver={e=>{e.currentTarget.style.background="rgba(255,255,255,0.05)";e.currentTarget.style.borderColor="rgba(0,229,255,0.25)"}}
+          onMouseOut={e=>{e.currentTarget.style.background="rgba(255,255,255,0.02)";e.currentTarget.style.borderColor=tier===1?"rgba(0,229,255,0.12)":"rgba(255,255,255,0.05)"}}
+        >
+          <div style={{ display:"flex", justifyContent:"space-between", gap:10, marginBottom:6 }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#fff", lineHeight:1.5, flex:1 }}>{article.title}</div>
+            <span style={{
+              flexShrink:0, fontSize:9, fontWeight:800, padding:"2px 7px", borderRadius:5,
+              background:`${TIER_COLOR[tier]}22`, color:TIER_COLOR[tier], border:`1px solid ${TIER_COLOR[tier]}44`,
+            }}>{labels[tier]}</span>
+          </div>
+          <div style={{ fontSize:11, color:"#888", lineHeight:1.5, marginBottom:8,
+            display:"-webkit-box", WebkitLineClamp:2, WebkitBoxOrient:"vertical", overflow:"hidden" }}>
+            {article.body}
+          </div>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+              {article.source_info?.img && <img src={article.source_info.img} alt="" style={{ width:14, height:14, borderRadius:3 }} onError={e=>e.target.style.display="none"} />}
+              <span style={{ fontSize:11, color:TIER_COLOR[tier], fontWeight:600 }}>{article.source_info?.name||article.source}</span>
+            </div>
+            <span style={{ fontSize:10, color:"#555" }}>{fmtShort(article.published_on*1000)}</span>
+          </div>
+        </a>
+      );
+    }
+
+    /* ═══════════════════════════════════════════
+       MAIN APP
+    ═══════════════════════════════════════════ */
     function App() {
       const [pair, setPair] = useState("BTC-USDT");
       const [price, setPrice] = useState("");
       const [bar, setBar] = useState("1H");
       const [loading, setLoading] = useState(false);
       const [result, setResult] = useState(null);
+      const [chartCandles, setChartCandles] = useState([]);
       const [error, setError] = useState(null);
       const [progress, setProgress] = useState("");
       const [batchCount, setBatchCount] = useState(0);
+      const [news, setNews] = useState([]);
+      const [newsLoading, setNewsLoading] = useState(false);
+      const [newsFilter, setNewsFilter] = useState("all");
+      const [enabledCats, setEnabledCats] = useState(new Set(Object.keys(CAT_CONFIG)));
+      const [activeTab, setActiveTab] = useState("chart"); // chart | timeline | news
       const abortRef = useRef(null);
-
       const coinName = pair.split("-")[0];
 
-      const search = useCallback(async () => {
-        if (!price || isNaN(Number(price))) {
-          setError("请输入有效价格");
-          return;
-        }
-        setLoading(true);
-        setError(null);
-        setResult(null);
-        setProgress("正在查询历史K线数据...");
-        setBatchCount(0);
+      const toggleCat = (cat) => {
+        setEnabledCats(prev => {
+          const next = new Set(prev);
+          next.has(cat) ? next.delete(cat) : next.add(cat);
+          return next;
+        });
+      };
 
-        const targetPrice = Number(price);
-        let found = null;
-        let after = "";
-        let attempts = 0;
-        const maxAttempts = 80;
+      /* ── Search Logic ── */
+      const search = useCallback(async () => {
+        if (!price || isNaN(Number(price))) { setError("请输入有效价格"); return; }
+        setLoading(true); setError(null); setResult(null); setChartCandles([]);
+        setNews([]); setProgress("正在查询历史K线数据..."); setBatchCount(0);
+
+        const target = Number(price);
+        let found = null, after = "", attempts = 0;
         const controller = new AbortController();
         abortRef.current = controller;
-
-        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        const allCandles = [];
 
         try {
-          while (attempts < maxAttempts && !found) {
-            attempts++;
-            setBatchCount(attempts);
+          while (attempts < 80 && !found) {
+            attempts++; setBatchCount(attempts);
             setProgress(`正在扫描第 ${attempts} 批K线数据...`);
-
             let url = `https://www.okx.com/api/v5/market/history-candles?instId=${pair}&bar=${bar}&limit=100`;
             if (after) url += `&after=${after}`;
 
-            let resp;
-            let retries = 0;
-            const maxRetries = 3;
-
-            while (retries <= maxRetries) {
+            let resp, retries = 0;
+            while (retries <= 3) {
               resp = await fetch(url, { signal: controller.signal });
               if (resp.status === 429) {
                 retries++;
-                if (retries > maxRetries) throw new Error("OKX API 频率限制，已重试 3 次仍失败。请稍后再试。");
-                const waitSec = retries * 2;
-                setProgress(`触发频率限制，等待 ${waitSec} 秒后重试（${retries}/${maxRetries}）...`);
-                await sleep(waitSec * 1000);
-              } else {
-                break;
-              }
+                if (retries > 3) throw new Error("OKX API 频率限制，已重试3次。请稍后再试。");
+                setProgress(`频率限制，等待 ${retries*2}s...`);
+                await sleep(retries * 2000);
+              } else break;
             }
-
-            if (!resp.ok) throw new Error(`API 请求失败: ${resp.status}`);
+            if (!resp.ok) throw new Error(`API 错误: ${resp.status}`);
             const json = await resp.json();
-            if (json.code !== "0") throw new Error(`OKX API 错误: ${json.msg}`);
+            if (json.code !== "0") throw new Error(`OKX: ${json.msg}`);
             const candles = json.data;
-            if (!candles || candles.length === 0) break;
+            if (!candles?.length) break;
 
+            allCandles.push(...candles);
             for (const c of candles) {
-              const [ts, open, high, low, close, vol] = c;
-              if (targetPrice >= Number(low) && targetPrice <= Number(high)) {
-                found = { ts, open, high, low, close, vol };
-                break;
-              }
+              if (target >= Number(c[3]) && target <= Number(c[2])) { found = { ts:c[0],open:c[1],high:c[2],low:c[3],close:c[4],vol:c[5] }; break; }
             }
-            if (!found) after = candles[candles.length - 1][0];
-
-            // 请求间隔 350ms，避免触发 OKX 频率限制（公开接口限制 20次/2秒）
-            if (!found) await sleep(350);
+            if (!found) { after = candles[candles.length-1][0]; await sleep(350); }
           }
 
           if (found) {
             setResult(found);
+            // Load more candles around the hit for chart context
+            setProgress("正在加载图表数据...");
+            let chartData = [...allCandles];
+            // Load some candles AFTER the hit time for context
+            try {
+              const beforeUrl = `https://www.okx.com/api/v5/market/candles?instId=${pair}&bar=${bar}&limit=100&before=${found.ts}`;
+              const br = await fetch(beforeUrl, { signal: controller.signal });
+              if (br.ok) {
+                const bj = await br.json();
+                if (bj.code === "0" && bj.data) chartData = [...bj.data, ...chartData];
+              }
+            } catch(e) {}
+            setChartCandles(chartData);
+
+            // Fetch news
+            setNewsLoading(true);
+            setProgress("正在获取当时的市场新闻...");
+            try {
+              const articles = await fetchNews(coinName, found.ts);
+              setNews(articles);
+            } catch(e) {}
+            setNewsLoading(false);
           } else {
-            setError(`在可查询范围内未找到价格 $${Number(price).toLocaleString()} 的记录（已扫描 ${attempts * 100} 根K线）`);
+            setError(`未找到价格 $${target.toLocaleString()} 的记录（已扫描 ${attempts*100} 根K线）`);
           }
-        } catch (e) {
+        } catch(e) {
           if (e.name !== "AbortError") {
-            if (e.message.includes("Failed to fetch") || e.message.includes("NetworkError")) {
-              setError("网络请求被阻止（CORS）。请尝试使用浏览器插件解除 CORS 限制，或通过后端代理访问 OKX API。");
-            } else {
-              setError(e.message);
-            }
+            setError(e.message.includes("fetch") ? "网络错误（可能是 CORS 限制）" : e.message);
           }
         }
-        setLoading(false);
-        setProgress("");
-      }, [pair, price, bar]);
+        setLoading(false); setProgress("");
+      }, [pair, price, bar, coinName]);
 
-      const cancel = () => {
-        if (abortRef.current) abortRef.current.abort();
-        setLoading(false);
-        setProgress("");
-      };
+      const cancel = () => { abortRef.current?.abort(); setLoading(false); setProgress(""); };
 
-      const newsDateRange = result ? { from: dateStr(result.ts, -3), to: dateStr(result.ts, 3) } : null;
+      /* ── Derived ── */
+      const filteredNews = news.filter(a => {
+        if(newsFilter==="all") return true;
+        if(newsFilter==="t1") return srcTier(a.source_info?.name||a.source)===1;
+        return srcTier(a.source_info?.name||a.source)<=2;
+      });
+      const t1Count = news.filter(a=>srcTier(a.source_info?.name||a.source)===1).length;
+      const newsDateRange = result ? { from: dateStr(result.ts,-3), to: dateStr(result.ts,3) } : null;
 
       return (
-        <div style={{ padding: "24px 16px", maxWidth: 780, margin: "0 auto" }}>
+        <div style={{ padding:"20px 16px", maxWidth:900, margin:"0 auto" }}>
           {/* Header */}
-          <div style={{ textAlign: "center", marginBottom: 36, paddingTop: 16 }}>
-            <div style={{ fontSize: 36, marginBottom: 8 }}>⏱️</div>
-            <h1 style={{ fontSize: 26, fontWeight: 800, color: "#00e5ff", letterSpacing: 1.5, marginBottom: 6 }}>
-              OKX Price Time Machine
+          <div style={{ textAlign:"center", marginBottom:28, paddingTop:12 }}>
+            <h1 style={{ fontSize:24, fontWeight:800, color:"#00e5ff", letterSpacing:1.5, marginBottom:4 }}>
+              ⏱️ OKX Price Time Machine
             </h1>
-            <p style={{ color: "#666", fontSize: 13 }}>
-              查找币对最后一次触及目标价格的时间 · 回溯当时的市场新闻
+            <p style={{ color:"#555", fontSize:12 }}>
+              查找最后触及目标价的时间 · K线图表 · 重大事件标注 · 实时新闻回溯
             </p>
           </div>
 
           {/* Control Panel */}
           <div style={{
-            background: "rgba(255,255,255,0.03)",
-            borderRadius: 16,
-            padding: "24px 20px",
-            border: "1px solid rgba(255,255,255,0.06)",
-            marginBottom: 24,
+            background:"rgba(255,255,255,0.02)", borderRadius:14,
+            padding:"20px 18px", border:"1px solid rgba(255,255,255,0.05)", marginBottom:20,
           }}>
-            {/* Row 1: Pair + Price */}
-            <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-              <div style={{ flex: "1 1 200px" }}>
-                <label style={{ fontSize: 11, color: "#666", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6, display: "block" }}>
-                  交易对
-                </label>
-                <select value={pair} onChange={e => setPair(e.target.value)} style={{
-                  width: "100%", padding: "11px 14px", background: "#12121f",
-                  border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10,
-                  color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", outline: "none",
+            <div style={{ display:"flex", gap:10, marginBottom:14, flexWrap:"wrap" }}>
+              <div style={{ flex:"1 1 180px" }}>
+                <label style={{ fontSize:10, color:"#555", textTransform:"uppercase", letterSpacing:1, marginBottom:5, display:"block" }}>交易对</label>
+                <select value={pair} onChange={e=>setPair(e.target.value)} style={{
+                  width:"100%", padding:"10px 12px", background:"#12121f",
+                  border:"1px solid rgba(255,255,255,0.08)", borderRadius:8,
+                  color:"#fff", fontSize:14, fontWeight:600, cursor:"pointer", outline:"none",
                 }}>
-                  {PAIRS.map(p => <option key={p} value={p}>{p.replace("-", " / ")}</option>)}
+                  {PAIRS.map(p=><option key={p} value={p}>{p.replace("-"," / ")}</option>)}
                 </select>
               </div>
-              <div style={{ flex: "1 1 200px" }}>
-                <label style={{ fontSize: 11, color: "#666", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6, display: "block" }}>
-                  目标价格 (USDT)
-                </label>
-                <input
-                  type="number" value={price} onChange={e => setPrice(e.target.value)}
-                  placeholder={coinName === "BTC" ? "例: 68000" : coinName === "ETH" ? "例: 3200" : "输入价格"}
-                  onKeyDown={e => e.key === "Enter" && !loading && search()}
+              <div style={{ flex:"1 1 180px" }}>
+                <label style={{ fontSize:10, color:"#555", textTransform:"uppercase", letterSpacing:1, marginBottom:5, display:"block" }}>目标价格 (USDT)</label>
+                <input type="number" value={price} onChange={e=>setPrice(e.target.value)}
+                  placeholder={coinName==="BTC"?"例: 68000":coinName==="ETH"?"例: 3200":"输入价格"}
+                  onKeyDown={e=>e.key==="Enter"&&!loading&&search()}
                   style={{
-                    width: "100%", padding: "11px 14px", background: "#12121f",
-                    border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10,
-                    color: "#fff", fontSize: 15, fontWeight: 600, outline: "none",
+                    width:"100%", padding:"10px 12px", background:"#12121f",
+                    border:"1px solid rgba(255,255,255,0.08)", borderRadius:8,
+                    color:"#fff", fontSize:14, fontWeight:600, outline:"none",
                   }}
                 />
               </div>
-            </div>
-
-            {/* Row 2: Bar selector */}
-            <div style={{ marginBottom: 20 }}>
-              <label style={{ fontSize: 11, color: "#666", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, display: "block" }}>
-                K线精度（精度越高回溯范围越短，精度越低覆盖时间越长）
-              </label>
-              <div style={{ display: "flex", gap: 6 }}>
-                {BAR_OPTIONS.map(b => (
-                  <button key={b.value} onClick={() => setBar(b.value)} style={{
-                    flex: 1, padding: "10px 0", textAlign: "center",
-                    background: bar === b.value ? "linear-gradient(135deg, #00e5ff, #007fff)" : "#12121f",
-                    color: bar === b.value ? "#000" : "#888",
-                    border: bar === b.value ? "none" : "1px solid rgba(255,255,255,0.08)",
-                    borderRadius: 10, cursor: "pointer", fontSize: 13,
-                    fontWeight: bar === b.value ? 800 : 400, transition: "all 0.2s",
-                  }}>
-                    {b.label}
-                  </button>
-                ))}
+              <div style={{ flex:"0 0 auto" }}>
+                <label style={{ fontSize:10, color:"#555", textTransform:"uppercase", letterSpacing:1, marginBottom:5, display:"block" }}>K线</label>
+                <div style={{ display:"flex", gap:4 }}>
+                  {BAR_OPTIONS.map(b=>(
+                    <button key={b.value} onClick={()=>setBar(b.value)} style={{
+                      padding:"10px 12px",
+                      background: bar===b.value?"linear-gradient(135deg,#00e5ff,#007fff)":"#12121f",
+                      color: bar===b.value?"#000":"#666",
+                      border: bar===b.value?"none":"1px solid rgba(255,255,255,0.06)",
+                      borderRadius:8, cursor:"pointer", fontSize:12, fontWeight: bar===b.value?800:400,
+                    }}>{b.label}</button>
+                  ))}
+                </div>
               </div>
             </div>
-
-            {/* Search button */}
-            <button onClick={loading ? cancel : search} disabled={!price && !loading} style={{
-              width: "100%", padding: "14px", border: "none", borderRadius: 12,
-              fontSize: 15, fontWeight: 800, cursor: price || loading ? "pointer" : "not-allowed",
-              background: loading ? "#ff3b3b" : !price ? "#333" : "linear-gradient(90deg, #00e5ff, #007fff)",
-              color: loading ? "#fff" : !price ? "#666" : "#000",
-              transition: "all 0.2s", letterSpacing: 0.5,
+            <button onClick={loading?cancel:search} disabled={!price&&!loading} style={{
+              width:"100%", padding:"12px", border:"none", borderRadius:10,
+              fontSize:14, fontWeight:800,
+              cursor: price||loading?"pointer":"not-allowed",
+              background: loading?"#ff3b3b":!price?"#222":"linear-gradient(90deg,#00e5ff,#007fff)",
+              color: loading?"#fff":!price?"#555":"#000",
             }}>
-              {loading ? `⏹ 停止查询（已扫描 ${batchCount} 批）` : "🔍 查询最后触及时间"}
+              {loading?`⏹ 停止（已扫描 ${batchCount} 批）`:"🔍 查询"}
             </button>
           </div>
 
           {/* Progress */}
-          {progress && (
-            <div style={{ textAlign: "center", padding: "12px 0", color: "#00e5ff", fontSize: 14 }}>
-              <span className="pulse">⏳</span> {progress}
-            </div>
-          )}
+          {progress && <div style={{ textAlign:"center", padding:"10px 0", color:"#00e5ff", fontSize:13 }}><span className="pulse">⏳</span> {progress}</div>}
+          {error && <div style={{ background:"rgba(255,59,59,0.06)", border:"1px solid rgba(255,59,59,0.15)", borderRadius:10, padding:"14px", marginBottom:20, color:"#ff6b6b", fontSize:13 }}>⚠️ {error}</div>}
 
-          {/* Error */}
-          {error && (
-            <div style={{
-              background: "rgba(255,59,59,0.08)", border: "1px solid rgba(255,59,59,0.2)",
-              borderRadius: 12, padding: "16px 20px", marginBottom: 24, color: "#ff6b6b", fontSize: 14, lineHeight: 1.6,
-            }}>
-              ⚠️ {error}
-            </div>
-          )}
-
-          {/* Result */}
+          {/* Result Area */}
           {result && (
             <div>
               {/* Price Result Card */}
               <div style={{
-                background: "rgba(0,229,255,0.04)", border: "1px solid rgba(0,229,255,0.15)",
-                borderRadius: 16, padding: "28px 24px", marginBottom: 24, position: "relative", overflow: "hidden",
+                background:"rgba(0,229,255,0.03)", border:"1px solid rgba(0,229,255,0.12)",
+                borderRadius:14, padding:"22px 20px", marginBottom:16,
               }}>
-                <div style={{
-                  position: "absolute", top: -40, right: -40, width: 120, height: 120,
-                  background: "radial-gradient(circle, rgba(0,229,255,0.08) 0%, transparent 70%)",
-                  borderRadius: "50%",
-                }} />
-
-                <div style={{ fontSize: 13, color: "#888", marginBottom: 6 }}>
-                  {pair.replace("-", " / ")} 最后一次触及
-                  <span style={{ color: "#00e5ff", fontWeight: 800, fontSize: 15, marginLeft: 6 }}>
-                    ${Number(price).toLocaleString()}
-                  </span>
+                <div style={{ fontSize:12, color:"#888", marginBottom:4 }}>
+                  {pair.replace("-"," / ")} 最后一次触及
+                  <span style={{ color:"#00e5ff", fontWeight:800, fontSize:14, marginLeft:6 }}>${Number(price).toLocaleString()}</span>
                 </div>
-
-                <div style={{ fontSize: 30, fontWeight: 800, color: "#fff", marginBottom: 4 }}>
-                  {formatDate(result.ts)}
-                </div>
-                <div style={{ fontSize: 13, color: "#00e5ff", marginBottom: 20, fontWeight: 600 }}>
-                  {timeSince(result.ts)}（北京时间）
-                </div>
-
-                {/* OHLCV Grid */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+                <div style={{ fontSize:28, fontWeight:800, color:"#fff", marginBottom:2 }}>{fmtDate(result.ts)}</div>
+                <div style={{ fontSize:12, color:"#00e5ff", fontWeight:600, marginBottom:16 }}>{timeSince(result.ts)}（北京时间）</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:6 }}>
                   {[
-                    { label: "开盘", val: result.open },
-                    { label: "最高", val: result.high, color: "#4caf50" },
-                    { label: "最低", val: result.low, color: "#ff5252" },
-                    { label: "收盘", val: result.close },
-                    { label: "成交量", val: result.vol, isVol: true },
-                  ].map(item => (
-                    <div key={item.label} style={{
-                      background: "rgba(255,255,255,0.03)", borderRadius: 10,
-                      padding: "10px 8px", textAlign: "center",
-                    }}>
-                      <div style={{ fontSize: 10, color: "#666", marginBottom: 4, textTransform: "uppercase" }}>{item.label}</div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: item.color || "#ccc" }}>
-                        {item.isVol
-                          ? Number(item.val).toLocaleString(undefined, { maximumFractionDigits: 0 })
-                          : "$" + Number(item.val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })
-                        }
+                    { l:"开盘", v:result.open },
+                    { l:"最高", v:result.high, c:"#4caf50" },
+                    { l:"最低", v:result.low, c:"#ff5252" },
+                    { l:"收盘", v:result.close },
+                    { l:"成交量", v:result.vol, vol:true },
+                  ].map(x=>(
+                    <div key={x.l} style={{ background:"rgba(255,255,255,0.02)", borderRadius:8, padding:"8px 6px", textAlign:"center" }}>
+                      <div style={{ fontSize:9, color:"#555", marginBottom:3 }}>{x.l}</div>
+                      <div style={{ fontSize:12, fontWeight:700, color:x.c||"#ccc" }}>
+                        {x.vol?Number(x.v).toLocaleString(undefined,{maximumFractionDigits:0}):"$"+Number(x.v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:6})}
                       </div>
                     </div>
                   ))}
                 </div>
-
-                <div style={{ marginTop: 12, fontSize: 11, color: "#444", textAlign: "right" }}>
-                  K线周期: {bar} · 数据来源: OKX Public API
-                </div>
               </div>
 
-              {/* News Section */}
+              {/* Event Category Filter */}
               <div style={{
-                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
-                borderRadius: 16, padding: "24px 20px",
+                display:"flex", flexWrap:"wrap", gap:6, marginBottom:14,
+                padding:"12px 14px", background:"rgba(255,255,255,0.02)",
+                border:"1px solid rgba(255,255,255,0.04)", borderRadius:10,
               }}>
-                <h2 style={{ fontSize: 18, fontWeight: 800, color: "#fff", marginBottom: 4 }}>
-                  📰 当时的市场新闻
-                </h2>
-                <p style={{ fontSize: 12, color: "#666", marginBottom: 20 }}>
-                  时间窗口: {newsDateRange.from} ~ {newsDateRange.to}（触及日 ±3 天）
-                </p>
+                <span style={{ fontSize:11, color:"#555", lineHeight:"28px", marginRight:4 }}>事件筛选:</span>
+                {Object.entries(CAT_CONFIG).map(([key, cfg]) => (
+                  <button key={key} onClick={()=>toggleCat(key)} style={{
+                    padding:"4px 10px", fontSize:11, fontWeight: enabledCats.has(key)?700:400,
+                    background: enabledCats.has(key)?cfg.color+"22":"transparent",
+                    color: enabledCats.has(key)?cfg.color:"#555",
+                    border:`1px solid ${enabledCats.has(key)?cfg.color+"44":"rgba(255,255,255,0.06)"}`,
+                    borderRadius:6, cursor:"pointer", transition:"all 0.15s",
+                  }}>
+                    {cfg.icon} {cfg.label}
+                  </button>
+                ))}
+              </div>
 
-                {/* News source grid */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8, marginBottom: 20 }}>
-                  {NEWS_SOURCES.map(src => (
-                    <a key={src.name} href={src.url(coinName, newsDateRange)} target="_blank" rel="noopener noreferrer"
-                      style={{
-                        display: "flex", alignItems: "center", gap: 8,
-                        padding: "12px 14px", background: "rgba(255,255,255,0.04)",
-                        border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10,
-                        color: "#ccc", fontSize: 13, textDecoration: "none",
-                        transition: "all 0.15s", fontWeight: 500,
-                      }}
-                      onMouseOver={e => { e.currentTarget.style.background = "rgba(0,229,255,0.08)"; e.currentTarget.style.borderColor = "rgba(0,229,255,0.25)"; e.currentTarget.style.color = "#00e5ff"; }}
-                      onMouseOut={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#ccc"; }}
-                    >
-                      <span style={{ fontSize: 16 }}>{src.icon}</span> {src.name}
-                    </a>
-                  ))}
-                </div>
+              {/* Tabs */}
+              <div style={{ display:"flex", gap:4, marginBottom:16 }}>
+                {[
+                  { key:"chart", label:"📈 K线图表", count: null },
+                  { key:"timeline", label:"📅 事件轴", count: null },
+                  { key:"news", label:"📰 新闻", count: news.length || null },
+                ].map(t=>(
+                  <button key={t.key} onClick={()=>setActiveTab(t.key)} style={{
+                    flex:1, padding:"10px 0", textAlign:"center", fontSize:13, fontWeight: activeTab===t.key?700:400,
+                    background: activeTab===t.key?"rgba(0,229,255,0.08)":"rgba(255,255,255,0.02)",
+                    color: activeTab===t.key?"#00e5ff":"#666",
+                    border: activeTab===t.key?"1px solid rgba(0,229,255,0.2)":"1px solid rgba(255,255,255,0.05)",
+                    borderRadius:10, cursor:"pointer", transition:"all 0.15s",
+                  }}>
+                    {t.label}{t.count ? ` (${t.count})` : ""}
+                  </button>
+                ))}
+              </div>
 
-                {/* Full Google search */}
-                <a href={`https://www.google.com/search?q=${coinName}+crypto+news&tbs=cdr:1,cd_min:${newsDateRange.from},cd_max:${newsDateRange.to}`}
-                  target="_blank" rel="noopener noreferrer"
-                  style={{
-                    display: "block", textAlign: "center", padding: "14px 20px",
-                    background: "linear-gradient(90deg, #00e5ff, #007fff)",
-                    borderRadius: 12, color: "#000", fontSize: 14, fontWeight: 800,
-                    textDecoration: "none", letterSpacing: 0.5,
-                  }}
-                >
-                  🌐 Google 搜索该时段所有 {coinName} 新闻
-                </a>
+              {/* Tab Content */}
+              <div style={{
+                background:"rgba(255,255,255,0.02)", border:"1px solid rgba(255,255,255,0.05)",
+                borderRadius:14, padding:"20px 18px", minHeight:300,
+              }}>
+                {/* ── CHART TAB ── */}
+                {activeTab === "chart" && (
+                  <div>
+                    <h3 style={{ fontSize:15, fontWeight:700, color:"#fff", marginBottom:12 }}>
+                      {pair.replace("-"," / ")} · {bar} K线 · 事件标注
+                    </h3>
+                    {chartCandles.length > 0 ? (
+                      <PriceChart candles={chartCandles} hitTs={result.ts} hitPrice={price} pair={pair} events={MAJOR_EVENTS} enabledCats={enabledCats} />
+                    ) : (
+                      <div style={{ textAlign:"center", padding:"60px 0", color:"#555" }}>图表数据加载中...</div>
+                    )}
+                    <div style={{ marginTop:8, fontSize:10, color:"#444", textAlign:"right" }}>
+                      图表上的圆圈标记 = 重大事件 · 箭头 = 触及目标价时间 · 虚线 = 目标价格线
+                    </div>
+                  </div>
+                )}
+
+                {/* ── TIMELINE TAB ── */}
+                {activeTab === "timeline" && (
+                  <EventTimeline events={MAJOR_EVENTS} hitTs={result.ts} enabledCats={enabledCats} />
+                )}
+
+                {/* ── NEWS TAB ── */}
+                {activeTab === "news" && (
+                  <div>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12, flexWrap:"wrap", gap:8 }}>
+                      <h3 style={{ fontSize:15, fontWeight:700, color:"#fff", margin:0 }}>
+                        当时的市场新闻
+                      </h3>
+                      <span style={{ fontSize:11, color:"#555" }}>
+                        {news.length > 0 ? `共 ${news.length} 篇 · T1: ${t1Count}` : ""}
+                      </span>
+                    </div>
+                    {news.length > 0 && (
+                      <div style={{ display:"flex", gap:5, marginBottom:14 }}>
+                        {[
+                          { k:"all", l:`全部 (${news.length})` },
+                          { k:"t1", l:`T1 权威 (${t1Count})` },
+                          { k:"t12", l:`T1+T2` },
+                        ].map(f=>(
+                          <button key={f.k} onClick={()=>setNewsFilter(f.k)} style={{
+                            padding:"5px 12px", fontSize:11, fontWeight: newsFilter===f.k?700:400,
+                            background: newsFilter===f.k?"rgba(0,229,255,0.12)":"rgba(255,255,255,0.03)",
+                            color: newsFilter===f.k?"#00e5ff":"#666",
+                            border: newsFilter===f.k?"1px solid rgba(0,229,255,0.25)":"1px solid rgba(255,255,255,0.06)",
+                            borderRadius:6, cursor:"pointer",
+                          }}>{f.l}</button>
+                        ))}
+                      </div>
+                    )}
+
+                    {newsLoading && <div style={{ textAlign:"center", padding:"40px 0", color:"#00e5ff", fontSize:13 }}><span className="pulse">⏳</span> 正在拉取新闻...</div>}
+
+                    {!newsLoading && filteredNews.length > 0 && (
+                      <div style={{ maxHeight:500, overflowY:"auto" }}>
+                        {filteredNews.map((a,i)=><NewsCard key={a.id} article={a} index={i} />)}
+                      </div>
+                    )}
+
+                    {!newsLoading && news.length > 0 && filteredNews.length === 0 && (
+                      <div style={{ textAlign:"center", padding:"30px 0", color:"#555", fontSize:12 }}>该筛选条件下无结果</div>
+                    )}
+
+                    {!newsLoading && news.length === 0 && (
+                      <div style={{ textAlign:"center", padding:"30px 0", color:"#555", fontSize:12 }}>未找到该时段相关新闻</div>
+                    )}
+
+                    {newsDateRange && (
+                      <a href={`https://www.google.com/search?q=${coinName}+crypto+news&tbs=cdr:1,cd_min:${newsDateRange.from},cd_max:${newsDateRange.to}`}
+                        target="_blank" rel="noopener noreferrer"
+                        style={{
+                          display:"block", textAlign:"center", padding:"10px", marginTop:12,
+                          background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.06)",
+                          borderRadius:8, color:"#666", fontSize:12, fontWeight:600,
+                        }}
+                        onMouseOver={e=>{e.currentTarget.style.color="#00e5ff"}}
+                        onMouseOut={e=>{e.currentTarget.style.color="#666"}}
+                      >
+                        🔍 在 Google 搜索更多 {coinName} 新闻
+                      </a>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
           )}
 
           {/* Footer */}
-          <div style={{ textAlign: "center", marginTop: 40, paddingBottom: 24, fontSize: 11, color: "#333", lineHeight: 1.8 }}>
-            <div>OKX Price Time Machine · Built for OKG</div>
-            <div>数据: OKX Public API · 新闻: CoinDesk / CoinTelegraph / The Block / Bloomberg / Reuters / 金色财经 / BlockBeats / PANews</div>
+          <div style={{ textAlign:"center", marginTop:32, paddingBottom:20, fontSize:10, color:"#2a2a40", lineHeight:1.8 }}>
+            <div>OKX Price Time Machine v2.0</div>
+            <div>价格: OKX API · 图表: TradingView Lightweight Charts · 新闻: CryptoCompare · 事件: 手动策展</div>
           </div>
         </div>
       );
