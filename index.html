@@ -118,6 +118,8 @@
         const controller = new AbortController();
         abortRef.current = controller;
 
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
         try {
           while (attempts < maxAttempts && !found) {
             attempts++;
@@ -127,7 +129,23 @@
             let url = `https://www.okx.com/api/v5/market/history-candles?instId=${pair}&bar=${bar}&limit=100`;
             if (after) url += `&after=${after}`;
 
-            const resp = await fetch(url, { signal: controller.signal });
+            let resp;
+            let retries = 0;
+            const maxRetries = 3;
+
+            while (retries <= maxRetries) {
+              resp = await fetch(url, { signal: controller.signal });
+              if (resp.status === 429) {
+                retries++;
+                if (retries > maxRetries) throw new Error("OKX API 频率限制，已重试 3 次仍失败。请稍后再试。");
+                const waitSec = retries * 2;
+                setProgress(`触发频率限制，等待 ${waitSec} 秒后重试（${retries}/${maxRetries}）...`);
+                await sleep(waitSec * 1000);
+              } else {
+                break;
+              }
+            }
+
             if (!resp.ok) throw new Error(`API 请求失败: ${resp.status}`);
             const json = await resp.json();
             if (json.code !== "0") throw new Error(`OKX API 错误: ${json.msg}`);
@@ -142,6 +160,9 @@
               }
             }
             if (!found) after = candles[candles.length - 1][0];
+
+            // 请求间隔 350ms，避免触发 OKX 频率限制（公开接口限制 20次/2秒）
+            if (!found) await sleep(350);
           }
 
           if (found) {
