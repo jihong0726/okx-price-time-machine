@@ -1,0 +1,391 @@
+
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OKX 历史价格查询</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      background: linear-gradient(135deg, #0a0a0f 0%, #1a1a2e 50%, #0a0a0f 100%);
+      color: #e0e0e0;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    input::-webkit-outer-spin-button, input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    input[type=number] { -moz-appearance: textfield; }
+    select option { background: #1e1e30; color: #fff; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .pulse { animation: pulse 1.5s infinite; }
+    a:hover { opacity: 0.85; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useCallback, useRef } = React;
+
+    const PAIRS = [
+      "BTC-USDT","ETH-USDT","SOL-USDT","BNB-USDT",
+      "XRP-USDT","DOGE-USDT","ADA-USDT","AVAX-USDT",
+      "DOT-USDT","LINK-USDT","MATIC-USDT","LTC-USDT",
+      "UNI-USDT","ATOM-USDT","FIL-USDT","APT-USDT",
+      "ARB-USDT","OP-USDT","NEAR-USDT","TRX-USDT",
+    ];
+
+    const NEWS_SOURCES = [
+      { name: "CoinDesk", icon: "📰", url: (q,d) => `https://www.google.com/search?q=site:coindesk.com+${q}+after:${d.from}+before:${d.to}` },
+      { name: "CoinTelegraph", icon: "📡", url: (q,d) => `https://www.google.com/search?q=site:cointelegraph.com+${q}+after:${d.from}+before:${d.to}` },
+      { name: "The Block", icon: "🧱", url: (q,d) => `https://www.google.com/search?q=site:theblock.co+${q}+after:${d.from}+before:${d.to}` },
+      { name: "Decrypt", icon: "🔓", url: (q,d) => `https://www.google.com/search?q=site:decrypt.co+${q}+after:${d.from}+before:${d.to}` },
+      { name: "Bloomberg", icon: "💹", url: (q,d) => `https://www.google.com/search?q=site:bloomberg.com+crypto+${q}+after:${d.from}+before:${d.to}` },
+      { name: "Reuters", icon: "🌐", url: (q,d) => `https://www.google.com/search?q=site:reuters.com+${q}+crypto+after:${d.from}+before:${d.to}` },
+      { name: "金色财经", icon: "🥇", url: (q,d) => `https://www.google.com/search?q=site:jinse.cn+${q}+after:${d.from}+before:${d.to}` },
+      { name: "BlockBeats", icon: "🎵", url: (q,d) => `https://www.google.com/search?q=site:theblockbeats.info+${q}+after:${d.from}+before:${d.to}` },
+      { name: "PANews", icon: "📋", url: (q,d) => `https://www.google.com/search?q=site:panewslab.com+${q}+after:${d.from}+before:${d.to}` },
+      { name: "CNBC", icon: "📺", url: (q,d) => `https://www.google.com/search?q=site:cnbc.com+${q}+crypto+after:${d.from}+before:${d.to}` },
+    ];
+
+    const BAR_OPTIONS = [
+      { label: "1分钟", value: "1m" },
+      { label: "5分钟", value: "5m" },
+      { label: "1小时", value: "1H" },
+      { label: "4小时", value: "4H" },
+      { label: "1天", value: "1D" },
+    ];
+
+    function formatDate(ts) {
+      const d = new Date(Number(ts));
+      return d.toLocaleString("zh-CN", {
+        year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+        hour12: false, timeZone: "Asia/Shanghai",
+      });
+    }
+
+    function dateStr(ts, offsetDays = 0) {
+      const d = new Date(Number(ts) + offsetDays * 86400000);
+      return d.toISOString().slice(0, 10);
+    }
+
+    function timeSince(ts) {
+      const now = Date.now();
+      const diff = now - Number(ts);
+      const mins = Math.floor(diff / 60000);
+      if (mins < 60) return `${mins} 分钟前`;
+      const hours = Math.floor(mins / 60);
+      if (hours < 24) return `${hours} 小时前`;
+      const days = Math.floor(hours / 24);
+      if (days < 30) return `${days} 天前`;
+      const months = Math.floor(days / 30);
+      if (months < 12) return `${months} 个月前`;
+      return `${Math.floor(months / 12)} 年前`;
+    }
+
+    function App() {
+      const [pair, setPair] = useState("BTC-USDT");
+      const [price, setPrice] = useState("");
+      const [bar, setBar] = useState("1H");
+      const [loading, setLoading] = useState(false);
+      const [result, setResult] = useState(null);
+      const [error, setError] = useState(null);
+      const [progress, setProgress] = useState("");
+      const [batchCount, setBatchCount] = useState(0);
+      const abortRef = useRef(null);
+
+      const coinName = pair.split("-")[0];
+
+      const search = useCallback(async () => {
+        if (!price || isNaN(Number(price))) {
+          setError("请输入有效价格");
+          return;
+        }
+        setLoading(true);
+        setError(null);
+        setResult(null);
+        setProgress("正在查询历史K线数据...");
+        setBatchCount(0);
+
+        const targetPrice = Number(price);
+        let found = null;
+        let after = "";
+        let attempts = 0;
+        const maxAttempts = 80;
+        const controller = new AbortController();
+        abortRef.current = controller;
+
+        try {
+          while (attempts < maxAttempts && !found) {
+            attempts++;
+            setBatchCount(attempts);
+            setProgress(`正在扫描第 ${attempts} 批K线数据...`);
+
+            let url = `https://www.okx.com/api/v5/market/history-candles?instId=${pair}&bar=${bar}&limit=100`;
+            if (after) url += `&after=${after}`;
+
+            const resp = await fetch(url, { signal: controller.signal });
+            if (!resp.ok) throw new Error(`API 请求失败: ${resp.status}`);
+            const json = await resp.json();
+            if (json.code !== "0") throw new Error(`OKX API 错误: ${json.msg}`);
+            const candles = json.data;
+            if (!candles || candles.length === 0) break;
+
+            for (const c of candles) {
+              const [ts, open, high, low, close, vol] = c;
+              if (targetPrice >= Number(low) && targetPrice <= Number(high)) {
+                found = { ts, open, high, low, close, vol };
+                break;
+              }
+            }
+            if (!found) after = candles[candles.length - 1][0];
+          }
+
+          if (found) {
+            setResult(found);
+          } else {
+            setError(`在可查询范围内未找到价格 $${Number(price).toLocaleString()} 的记录（已扫描 ${attempts * 100} 根K线）`);
+          }
+        } catch (e) {
+          if (e.name !== "AbortError") {
+            if (e.message.includes("Failed to fetch") || e.message.includes("NetworkError")) {
+              setError("网络请求被阻止（CORS）。请尝试使用浏览器插件解除 CORS 限制，或通过后端代理访问 OKX API。");
+            } else {
+              setError(e.message);
+            }
+          }
+        }
+        setLoading(false);
+        setProgress("");
+      }, [pair, price, bar]);
+
+      const cancel = () => {
+        if (abortRef.current) abortRef.current.abort();
+        setLoading(false);
+        setProgress("");
+      };
+
+      const newsDateRange = result ? { from: dateStr(result.ts, -3), to: dateStr(result.ts, 3) } : null;
+
+      return (
+        <div style={{ padding: "24px 16px", maxWidth: 780, margin: "0 auto" }}>
+          {/* Header */}
+          <div style={{ textAlign: "center", marginBottom: 36, paddingTop: 16 }}>
+            <div style={{ fontSize: 36, marginBottom: 8 }}>⏱️</div>
+            <h1 style={{ fontSize: 26, fontWeight: 800, color: "#00e5ff", letterSpacing: 1.5, marginBottom: 6 }}>
+              OKX Price Time Machine
+            </h1>
+            <p style={{ color: "#666", fontSize: 13 }}>
+              查找币对最后一次触及目标价格的时间 · 回溯当时的市场新闻
+            </p>
+          </div>
+
+          {/* Control Panel */}
+          <div style={{
+            background: "rgba(255,255,255,0.03)",
+            borderRadius: 16,
+            padding: "24px 20px",
+            border: "1px solid rgba(255,255,255,0.06)",
+            marginBottom: 24,
+          }}>
+            {/* Row 1: Pair + Price */}
+            <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 200px" }}>
+                <label style={{ fontSize: 11, color: "#666", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6, display: "block" }}>
+                  交易对
+                </label>
+                <select value={pair} onChange={e => setPair(e.target.value)} style={{
+                  width: "100%", padding: "11px 14px", background: "#12121f",
+                  border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10,
+                  color: "#fff", fontSize: 15, fontWeight: 600, cursor: "pointer", outline: "none",
+                }}>
+                  {PAIRS.map(p => <option key={p} value={p}>{p.replace("-", " / ")}</option>)}
+                </select>
+              </div>
+              <div style={{ flex: "1 1 200px" }}>
+                <label style={{ fontSize: 11, color: "#666", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6, display: "block" }}>
+                  目标价格 (USDT)
+                </label>
+                <input
+                  type="number" value={price} onChange={e => setPrice(e.target.value)}
+                  placeholder={coinName === "BTC" ? "例: 68000" : coinName === "ETH" ? "例: 3200" : "输入价格"}
+                  onKeyDown={e => e.key === "Enter" && !loading && search()}
+                  style={{
+                    width: "100%", padding: "11px 14px", background: "#12121f",
+                    border: "1px solid rgba(255,255,255,0.1)", borderRadius: 10,
+                    color: "#fff", fontSize: 15, fontWeight: 600, outline: "none",
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Row 2: Bar selector */}
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ fontSize: 11, color: "#666", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8, display: "block" }}>
+                K线精度（精度越高回溯范围越短，精度越低覆盖时间越长）
+              </label>
+              <div style={{ display: "flex", gap: 6 }}>
+                {BAR_OPTIONS.map(b => (
+                  <button key={b.value} onClick={() => setBar(b.value)} style={{
+                    flex: 1, padding: "10px 0", textAlign: "center",
+                    background: bar === b.value ? "linear-gradient(135deg, #00e5ff, #007fff)" : "#12121f",
+                    color: bar === b.value ? "#000" : "#888",
+                    border: bar === b.value ? "none" : "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: 10, cursor: "pointer", fontSize: 13,
+                    fontWeight: bar === b.value ? 800 : 400, transition: "all 0.2s",
+                  }}>
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Search button */}
+            <button onClick={loading ? cancel : search} disabled={!price && !loading} style={{
+              width: "100%", padding: "14px", border: "none", borderRadius: 12,
+              fontSize: 15, fontWeight: 800, cursor: price || loading ? "pointer" : "not-allowed",
+              background: loading ? "#ff3b3b" : !price ? "#333" : "linear-gradient(90deg, #00e5ff, #007fff)",
+              color: loading ? "#fff" : !price ? "#666" : "#000",
+              transition: "all 0.2s", letterSpacing: 0.5,
+            }}>
+              {loading ? `⏹ 停止查询（已扫描 ${batchCount} 批）` : "🔍 查询最后触及时间"}
+            </button>
+          </div>
+
+          {/* Progress */}
+          {progress && (
+            <div style={{ textAlign: "center", padding: "12px 0", color: "#00e5ff", fontSize: 14 }}>
+              <span className="pulse">⏳</span> {progress}
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div style={{
+              background: "rgba(255,59,59,0.08)", border: "1px solid rgba(255,59,59,0.2)",
+              borderRadius: 12, padding: "16px 20px", marginBottom: 24, color: "#ff6b6b", fontSize: 14, lineHeight: 1.6,
+            }}>
+              ⚠️ {error}
+            </div>
+          )}
+
+          {/* Result */}
+          {result && (
+            <div>
+              {/* Price Result Card */}
+              <div style={{
+                background: "rgba(0,229,255,0.04)", border: "1px solid rgba(0,229,255,0.15)",
+                borderRadius: 16, padding: "28px 24px", marginBottom: 24, position: "relative", overflow: "hidden",
+              }}>
+                <div style={{
+                  position: "absolute", top: -40, right: -40, width: 120, height: 120,
+                  background: "radial-gradient(circle, rgba(0,229,255,0.08) 0%, transparent 70%)",
+                  borderRadius: "50%",
+                }} />
+
+                <div style={{ fontSize: 13, color: "#888", marginBottom: 6 }}>
+                  {pair.replace("-", " / ")} 最后一次触及
+                  <span style={{ color: "#00e5ff", fontWeight: 800, fontSize: 15, marginLeft: 6 }}>
+                    ${Number(price).toLocaleString()}
+                  </span>
+                </div>
+
+                <div style={{ fontSize: 30, fontWeight: 800, color: "#fff", marginBottom: 4 }}>
+                  {formatDate(result.ts)}
+                </div>
+                <div style={{ fontSize: 13, color: "#00e5ff", marginBottom: 20, fontWeight: 600 }}>
+                  {timeSince(result.ts)}（北京时间）
+                </div>
+
+                {/* OHLCV Grid */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+                  {[
+                    { label: "开盘", val: result.open },
+                    { label: "最高", val: result.high, color: "#4caf50" },
+                    { label: "最低", val: result.low, color: "#ff5252" },
+                    { label: "收盘", val: result.close },
+                    { label: "成交量", val: result.vol, isVol: true },
+                  ].map(item => (
+                    <div key={item.label} style={{
+                      background: "rgba(255,255,255,0.03)", borderRadius: 10,
+                      padding: "10px 8px", textAlign: "center",
+                    }}>
+                      <div style={{ fontSize: 10, color: "#666", marginBottom: 4, textTransform: "uppercase" }}>{item.label}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: item.color || "#ccc" }}>
+                        {item.isVol
+                          ? Number(item.val).toLocaleString(undefined, { maximumFractionDigits: 0 })
+                          : "$" + Number(item.val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })
+                        }
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ marginTop: 12, fontSize: 11, color: "#444", textAlign: "right" }}>
+                  K线周期: {bar} · 数据来源: OKX Public API
+                </div>
+              </div>
+
+              {/* News Section */}
+              <div style={{
+                background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)",
+                borderRadius: 16, padding: "24px 20px",
+              }}>
+                <h2 style={{ fontSize: 18, fontWeight: 800, color: "#fff", marginBottom: 4 }}>
+                  📰 当时的市场新闻
+                </h2>
+                <p style={{ fontSize: 12, color: "#666", marginBottom: 20 }}>
+                  时间窗口: {newsDateRange.from} ~ {newsDateRange.to}（触及日 ±3 天）
+                </p>
+
+                {/* News source grid */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 8, marginBottom: 20 }}>
+                  {NEWS_SOURCES.map(src => (
+                    <a key={src.name} href={src.url(coinName, newsDateRange)} target="_blank" rel="noopener noreferrer"
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        padding: "12px 14px", background: "rgba(255,255,255,0.04)",
+                        border: "1px solid rgba(255,255,255,0.08)", borderRadius: 10,
+                        color: "#ccc", fontSize: 13, textDecoration: "none",
+                        transition: "all 0.15s", fontWeight: 500,
+                      }}
+                      onMouseOver={e => { e.currentTarget.style.background = "rgba(0,229,255,0.08)"; e.currentTarget.style.borderColor = "rgba(0,229,255,0.25)"; e.currentTarget.style.color = "#00e5ff"; }}
+                      onMouseOut={e => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.borderColor = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#ccc"; }}
+                    >
+                      <span style={{ fontSize: 16 }}>{src.icon}</span> {src.name}
+                    </a>
+                  ))}
+                </div>
+
+                {/* Full Google search */}
+                <a href={`https://www.google.com/search?q=${coinName}+crypto+news&tbs=cdr:1,cd_min:${newsDateRange.from},cd_max:${newsDateRange.to}`}
+                  target="_blank" rel="noopener noreferrer"
+                  style={{
+                    display: "block", textAlign: "center", padding: "14px 20px",
+                    background: "linear-gradient(90deg, #00e5ff, #007fff)",
+                    borderRadius: 12, color: "#000", fontSize: 14, fontWeight: 800,
+                    textDecoration: "none", letterSpacing: 0.5,
+                  }}
+                >
+                  🌐 Google 搜索该时段所有 {coinName} 新闻
+                </a>
+              </div>
+            </div>
+          )}
+
+          {/* Footer */}
+          <div style={{ textAlign: "center", marginTop: 40, paddingBottom: 24, fontSize: 11, color: "#333", lineHeight: 1.8 }}>
+            <div>OKX Price Time Machine · Built for OKG</div>
+            <div>数据: OKX Public API · 新闻: CoinDesk / CoinTelegraph / The Block / Bloomberg / Reuters / 金色财经 / BlockBeats / PANews</div>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
