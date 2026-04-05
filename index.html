@@ -70,7 +70,9 @@
       { date: "2025-04-09", cat: "trump", title: "90天关税暂停", desc: "BTC 反弹超 8%，市场大幅回暖" },
       { date: "2025-05-12", cat: "trump", title: "中美日内瓦贸易协议", desc: "关税大幅降低，BTC 突破 $105K" },
       { date: "2025-12-16", cat: "trump", title: "美国稳定币法案推进", desc: "参议院推进 GENIUS Act 稳定币立法" },
-      { date: "2026-01-15", cat: "trump", title: "特朗普数字资产政策年度回顾", desc: "执政满一年，加密监管政策逐步明朗" },
+      { date: "2026-01-09", cat: "trump", title: "特朗普新一轮关税裁定", desc: "BTC 在 $91K 附近震荡，市场等待关税政策明确" },
+      { date: "2026-02-23", cat: "trump", title: "特朗普关税升级 墨加中", desc: "对墨西哥加拿大中国加征新关税，BTC 跌破 $65K" },
+      { date: "2026-04-03", cat: "trump", title: "CLARITY Act 签署目标日", desc: "美国最全面加密监管法案，两党达成协议，预计签署" },
 
       // ── ETF ──
       { date: "2024-01-10", cat: "etf", title: "SEC 批准 BTC 现货 ETF", desc: "11只 BTC 现货 ETF 获批，历史性时刻" },
@@ -78,6 +80,7 @@
       { date: "2024-07-23", cat: "etf", title: "ETH ETF 正式交易", desc: "9只以太坊 ETF 上市交易" },
       { date: "2025-04-30", cat: "etf", title: "BTC ETF 期权交易扩展", desc: "多家交易所推出 BTC ETF 期权产品" },
       { date: "2025-07-10", cat: "etf", title: "SOL ETF 申请提交", desc: "多家机构提交 SOL 现货 ETF 申请" },
+      { date: "2026-03-27", cat: "etf", title: "SEC 91个加密 ETF 最终截止日", desc: "覆盖 24 种代币的 ETF 申请 240 天最终期限" },
 
       // ── 减半 ──
       { date: "2024-04-20", cat: "halving", title: "BTC 第四次减半", desc: "区块奖励从 6.25 降至 3.125 BTC" },
@@ -88,6 +91,7 @@
       { date: "2024-11-21", cat: "regulation", title: "SEC 主席 Gary Gensler 宣布辞职", desc: "预计继任者更加加密友好" },
       { date: "2025-02-04", cat: "regulation", title: "SEC 成立加密特别工作组", desc: "由 Hester Peirce 领导的 Crypto Task Force" },
       { date: "2025-06-15", cat: "regulation", title: "MiCA 在欧盟全面生效", desc: "欧盟加密市场法规完全实施" },
+      { date: "2026-03-17", cat: "regulation", title: "SEC/CFTC 联合规则：16种加密资产定性为商品", desc: "现货市场管辖权移交 CFTC，ETF 管线全面打通" },
 
       // ── 安全/黑客 ──
       { date: "2024-02-09", cat: "hack", title: "PlayDapp 被黑 $2.9亿", desc: "铸币漏洞被利用，损失巨大" },
@@ -103,6 +107,8 @@
       { date: "2025-03-19", cat: "macro", title: "美联储继续按兵不动", desc: "关税不确定性影响政策判断" },
       { date: "2025-05-07", cat: "macro", title: "美联储维持利率不变", desc: "鲍威尔强调需更多数据" },
       { date: "2025-09-17", cat: "macro", title: "美联储重启降息", desc: "降息 25bp，经济放缓信号" },
+      { date: "2026-01-29", cat: "macro", title: "美联储维持利率 3.5-3.75%", desc: "按兵不动，关注关税通胀影响" },
+      { date: "2026-03-18", cat: "macro", title: "美联储维持利率 3.5-3.75%", desc: "11-1 投票维持不变，dot plot 预计年内 1 次降息" },
 
       // ── 行业/采用 ──
       { date: "2024-03-14", cat: "adoption", title: "BTC 突破 $73,000 新高", desc: "ETF 资金持续流入推动" },
@@ -110,6 +116,7 @@
       { date: "2025-01-20", cat: "adoption", title: "BTC 新高 $109,000", desc: "特朗普就职日行情" },
       { date: "2025-05-22", cat: "adoption", title: "BTC 突破 $111,000", desc: "刷新历史最高纪录" },
       { date: "2025-11-20", cat: "adoption", title: "微策略 BTC 持仓超 50万枚", desc: "企业持币标杆" },
+      { date: "2026-03-01", cat: "adoption", title: "Kraken 获美联储主账户", desc: "首家获得 Fed Master Account 的数字资产银行" },
     ];
 
     const CAT_CONFIG = {
@@ -172,10 +179,13 @@
       const hitSec = Math.floor(Number(hitTs)/1000);
       const lo = hitSec - 2*86400, hi = hitSec + 86400;
       const all = []; let lTs = hi;
+
+      // Try category-specific first
       for (let p=0; p<5; p++) {
         try {
-          const r = await fetch(`https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=${coin}&lTs=${lTs}&extraParams=OKXTimeMachine`);
-          if(!r.ok) break;
+          const url = `https://min-api.cryptocompare.com/data/v2/news/?lang=EN&categories=${coin}&lTs=${lTs}&extraParams=OKXTimeMachine`;
+          const r = await fetch(url);
+          if(!r.ok) { console.warn("News API error:", r.status); break; }
           const j = await r.json();
           if(!j.Data||!j.Data.length) break;
           for (const a of j.Data) {
@@ -183,9 +193,26 @@
             if(a.published_on<lo) return dedup(all);
           }
           lTs = j.Data[j.Data.length-1].published_on;
-          await sleep(200);
-        } catch(e) { break; }
+          await sleep(250);
+        } catch(e) { console.warn("News fetch error:", e); break; }
       }
+
+      // If no category results, try general crypto news for the time window
+      if (all.length === 0) {
+        try {
+          const url = `https://min-api.cryptocompare.com/data/v2/news/?lang=EN&lTs=${hi}&extraParams=OKXTimeMachine`;
+          const r = await fetch(url);
+          if (r.ok) {
+            const j = await r.json();
+            if (j.Data) {
+              for (const a of j.Data) {
+                if (a.published_on >= lo && a.published_on <= hi) all.push(a);
+              }
+            }
+          }
+        } catch(e) { console.warn("General news fallback error:", e); }
+      }
+
       return dedup(all);
     }
     function dedup(a) { const s=new Set(); return a.filter(x=>{ if(s.has(x.id))return false; s.add(x.id); return true; }); }
@@ -219,11 +246,18 @@
           wickUpColor: "#26a69a", wickDownColor: "#ef5350",
         });
 
-        const data = candles.map(c => ({
+        // Build + deduplicate + sort candle data
+        const rawData = candles.map(c => ({
           time: Math.floor(Number(c[0])/1000),
           open: Number(c[1]), high: Number(c[2]),
           low: Number(c[3]), close: Number(c[4]),
-        })).sort((a,b)=>a.time-b.time);
+        }));
+        const timeMap = new Map();
+        for (const d of rawData) {
+          if (!timeMap.has(d.time)) timeMap.set(d.time, d);
+        }
+        const data = Array.from(timeMap.values()).sort((a,b)=>a.time-b.time);
+        if (data.length === 0) return;
 
         series.setData(data);
 
@@ -270,16 +304,29 @@
         markers.sort((a,b)=>a.time-b.time);
         series.setMarkers(markers);
 
-        // hit time marker
+        // hit time marker - snap to nearest candle
+        let hitSnap = data[0]?.time || hitSec;
+        let hitMinDiff = Infinity;
+        for (const d of data) {
+          const diff = Math.abs(d.time - hitSec);
+          if (diff < hitMinDiff) { hitMinDiff = diff; hitSnap = d.time; }
+        }
         const hitMarker = {
-          time: hitSec,
+          time: hitSnap,
           position: "belowBar",
           color: "#00e5ff",
           shape: "arrowUp",
           text: "⏱ 触及目标价",
         };
         const allMarkers = [...markers, hitMarker].sort((a,b)=>a.time-b.time);
-        series.setMarkers(allMarkers);
+        // Remove duplicate times (Lightweight Charts requires unique marker times)
+        const markerTimeSet = new Set();
+        const uniqueMarkers = allMarkers.filter(m => {
+          const key = m.time + m.position;
+          if (markerTimeSet.has(key)) return false;
+          markerTimeSet.add(key); return true;
+        });
+        series.setMarkers(uniqueMarkers);
 
         // auto-fit
         chart.timeScale().fitContent();
@@ -301,20 +348,38 @@
     ═══════════════════════════════════════════ */
     function EventTimeline({ events, hitTs, enabledCats }) {
       const hitDate = dateStr(hitTs);
-      // show events within ±30 days of hit
-      const lo = new Date(Number(hitTs) - 30*864e5).toISOString().slice(0,10);
-      const hi = new Date(Number(hitTs) + 30*864e5).toISOString().slice(0,10);
+      const hitMs = Number(hitTs);
 
-      const nearby = events
-        .filter(e => e.date >= lo && e.date <= hi && enabledCats.has(e.cat))
-        .sort((a,b) => a.date.localeCompare(b.date));
+      // Try ±30 days first, then expand if empty
+      let windowDays = 30;
+      let nearby = [];
+      const enabledEvents = events.filter(e => enabledCats.has(e.cat));
+
+      for (const w of [30, 60, 90, 180, 365]) {
+        const lo = new Date(hitMs - w*864e5).toISOString().slice(0,10);
+        const hi = new Date(hitMs + w*864e5).toISOString().slice(0,10);
+        nearby = enabledEvents
+          .filter(e => e.date >= lo && e.date <= hi)
+          .sort((a,b) => a.date.localeCompare(b.date));
+        if (nearby.length > 0) { windowDays = w; break; }
+      }
+
+      // If still empty, show the closest 8 events by date
+      if (!nearby.length && enabledEvents.length > 0) {
+        nearby = enabledEvents
+          .map(e => ({ ...e, _dist: Math.abs(new Date(e.date).getTime() - hitMs) }))
+          .sort((a,b) => a._dist - b._dist)
+          .slice(0, 8)
+          .sort((a,b) => a.date.localeCompare(b.date));
+        windowDays = -1; // flag for "nearest"
+      }
 
       if (!nearby.length) return null;
 
       return (
         <div style={{ marginTop: 16 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, color: "#fff", marginBottom: 12 }}>
-            📅 事件时间轴（触及日 ±30天）
+            📅 事件时间轴{windowDays > 0 ? `（触及日 ±${windowDays}天）` : "（最近事件）"}
           </h3>
           <div style={{ position: "relative", paddingLeft: 20 }}>
             <div style={{ position:"absolute", left:7, top:0, bottom:0, width:2, background:"#1e1e35" }} />
@@ -469,19 +534,49 @@
 
           if (found) {
             setResult(found);
-            // Load more candles around the hit for chart context
+            // ── Load chart candles centered on hit time ──
             setProgress("正在加载图表数据...");
-            let chartData = [...allCandles];
-            // Load some candles AFTER the hit time for context
-            try {
-              const beforeUrl = `https://www.okx.com/api/v5/market/candles?instId=${pair}&bar=${bar}&limit=100&before=${found.ts}`;
-              const br = await fetch(beforeUrl, { signal: controller.signal });
-              if (br.ok) {
-                const bj = await br.json();
-                if (bj.code === "0" && bj.data) chartData = [...bj.data, ...chartData];
+            const chartData = [];
+            const sig = controller.signal;
+
+            // helper: fetch with 429 retry
+            async function okxFetch(u) {
+              for (let r=0; r<=3; r++) {
+                const rp = await fetch(u, { signal: sig });
+                if (rp.status === 429) { await sleep((r+1)*2000); continue; }
+                if (!rp.ok) return [];
+                const j = await rp.json();
+                return (j.code === "0" && j.data) ? j.data : [];
               }
+              return [];
+            }
+
+            // 1) Candles OLDER than hit (including hit): use history-candles with after=hitTs
+            //    OKX after param: returns candles with ts < after (older)
+            try {
+              const older = await okxFetch(
+                `https://www.okx.com/api/v5/market/history-candles?instId=${pair}&bar=${bar}&limit=100&after=${Number(found.ts)+1}`
+              );
+              chartData.push(...older);
+              await sleep(350);
             } catch(e) {}
-            setChartCandles(chartData);
+
+            // 2) Candles NEWER than hit: use /candles with after=hitTs
+            //    OKX before param on /candles: returns candles with ts > before (newer)
+            try {
+              const newer = await okxFetch(
+                `https://www.okx.com/api/v5/market/candles?instId=${pair}&bar=${bar}&limit=100&after=${Number(found.ts)-1}`
+              );
+              chartData.push(...newer);
+            } catch(e) {}
+
+            // Deduplicate by timestamp
+            const seen = new Set();
+            const dedupChart = chartData.filter(c => {
+              if (seen.has(c[0])) return false;
+              seen.add(c[0]); return true;
+            });
+            setChartCandles(dedupChart);
 
             // Fetch news
             setNewsLoading(true);
@@ -489,7 +584,10 @@
             try {
               const articles = await fetchNews(coinName, found.ts);
               setNews(articles);
-            } catch(e) {}
+              if (articles.length === 0) console.log("No news found for", coinName, "around", new Date(Number(found.ts)).toISOString());
+            } catch(e) {
+              console.error("News fetch failed:", e);
+            }
             setNewsLoading(false);
           } else {
             setError(`未找到价格 $${target.toLocaleString()} 的记录（已扫描 ${attempts*100} 根K线）`);
